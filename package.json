@@ -1,0 +1,17 @@
+{
+  "name": "scraper-notifier",
+  "version": "1.0.0",
+  "description": "A scraper that notifies when a specific event occurs on a webpage.",
+  "author": "Mehdi",
+  "license": "ISC",
+  "keywords": [],
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^17.2.0",
+    "mysql2": "^3.14.2",
+    "nodemailer": "^7.0.5",
+    "puppeteer": "^24.14.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}
