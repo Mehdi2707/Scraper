@@ -1,5 +1,3 @@
-// scraper.js
-
 // 1. Importez et configurez dotenv en premier
 import dotenv from 'dotenv';
 dotenv.config(); // Charge les variables d'environnement de votre fichier .env
@@ -15,23 +13,26 @@ import { setTimeout } from "node:timers/promises"; // Pour la fonction sommeil (
 import { envoyerNotificationEmail } from './utils/emailService.js';
 import { verifierDisponibiliteBillets } from './utils/scraperUtils.js';
 import { parseArguments } from './utils/argsParser.js';
+import { getAlerts } from './utils/getAlerts.js';
 
 // 3. Activez le plugin Stealth pour Puppeteer-Extra
 puppeteer.use(StealthPlugin());
 
-async function executerScrapingSite(urlCible, emailNotification = '', texteDeclencheurEvenement = '') {
-    let navigateur;
+/**
+ * Scrape une seule URL et gère la logique de détection/notification.
+ * Cette fonction ne gère PAS le lancement/fermeture du navigateur ou de la page.
+ * @param {Page} page - L'objet Page de Puppeteer déjà ouvert.
+ * @param {string} urlCible - L'URL à scraper.
+ * @param {string} [emailNotification=''] - L'adresse e-mail pour la notification.
+ * @param {string} [texteDeclencheurEvenement=''] - Le texte de l'événement déclencheur.
+ * @returns {Promise<object>} Les résultats du scraping pour cette URL.
+ */
+async function scrapeSingleUrl(page, urlCible, emailNotification = '', texteDeclencheurEvenement = '') {
     try {
-        console.log(`Lancement du navigateur pour : ${urlCible}`);
-        navigateur = await puppeteer.launch({ headless: false });
-        const page = await navigateur.newPage();
-        
-        await page.setViewport({ width: 1920, height: 1080 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
         console.log(`Navigation vers : ${urlCible}`);
         await page.goto(urlCible, { waitUntil: 'networkidle2', timeout: 80000 });
-        await setTimeout(20000);
+        //await setTimeout(20000); // Attendre un peu après le chargement initial
+
         const selecteurBoutonChoixRapide = '.event-choice-map-fast-btn';
         const selecteurListePrix = '.session-price-list';
 
@@ -82,8 +83,8 @@ async function executerScrapingSite(urlCible, emailNotification = '', texteDecle
         let evenementDetecte = statutBillets.estDisponible;
 
         if (evenementDetecte && emailNotification) {
-            let detailsNotification = statutBillets.details.map(t => `${t.categorie} (${t.statut || 'Disponible'}) ${t.aBoutonPlus ? '(Bouton +)' : ''}`).join(', ');
-            const texteFinalEvenement = texteDeclencheurEvenement || `Places disponibles : ${detailsNotification}`; // Optionnel: Inclure les détails dans le texte par défaut
+            let detailsNotification = statutBillets.details.map(t => `${t.categorie} (${t.statut || 'Disponible'}) ${t.prix}`).join(', ');
+            const texteFinalEvenement = texteDeclencheurEvenement || `Places disponibles : ${detailsNotification}`;
             await envoyerNotificationEmail(emailNotification, urlCible, texteFinalEvenement);
         }
 
@@ -116,22 +117,79 @@ async function executerScrapingSite(urlCible, emailNotification = '', texteDecle
             url: urlCible,
             erreur: erreur.message
         };
+    }
+}
+
+// --- Fonction principale d'exécution ---
+async function main() {
+    let navigateur;
+    try {
+        // 1. Parse les arguments de la ligne de commande
+        const { urlCible: cmdLineUrl, emailNotification: cmdLineEmail, texteDeclencheurEvenement: cmdLineTriggerText } = parseArguments(process.argv);
+
+        // 2. Récupère les alertes depuis la base de données
+        let alerts = await getAlerts();
+
+        // 3. Gère l'URL de la ligne de commande : l'ajoute si fournie et non déjà dans la DB
+        if (cmdLineUrl) {
+            const isUrlAlreadyInDb = alerts.some(alert => alert.link === cmdLineUrl);
+            if (!isUrlAlreadyInDb) {
+                console.log(`Ajout de l'URL de la ligne de commande (${cmdLineUrl}) à la liste des alertes à scraper.`);
+                // Crée un objet alerte temporaire pour l'URL de la ligne de commande
+                alerts.push({ 
+                    id: 'cmd-line-override', 
+                    link: cmdLineUrl, 
+                    email: cmdLineEmail, 
+                    trigger_text: cmdLineTriggerText 
+                });
+            } else {
+                console.log(`L'URL de la ligne de commande (${cmdLineUrl}) est déjà présente dans la base de données. Elle sera traitée comme une alerte DB.`);
+            }
+        }
+
+        if (alerts.length === 0) {
+            console.log("Aucune alerte à scraper (ni via base de données, ni via ligne de commande).");
+            return; // Quitte si rien à scraper
+        }
+
+        console.log(`Lancement du navigateur pour ${alerts.length} alerte(s).`);
+        navigateur = await puppeteer.launch({ headless: false }); // Lance le navigateur une seule fois
+
+        // 4. Boucle sur toutes les alertes (DB + ligne de commande si ajoutée)
+        for (const alert of alerts) {
+            console.log(`\n--- Début du traitement pour l'alerte ID: ${alert.id || 'N/A'} (URL: ${alert.link}) ---`);
+            const page = await navigateur.newPage(); // Ouvre une nouvelle page pour chaque alerte
+            
+            // Utilise les informations spécifiques à l'alerte, ou les valeurs de la ligne de commande si non définies dans l'alerte
+            const currentEmail = alert.email || cmdLineEmail;
+            const currentTriggerText = alert.trigger_text || cmdLineTriggerText;
+
+            const result = await scrapeSingleUrl(page, alert.link, currentEmail, currentTriggerText);
+            
+            // Ici, vous pouvez ajouter une logique pour mettre à jour la base de données
+            // par exemple, marquer l'alerte comme 'accessible' ou 'fermée' si un événement est détecté
+            // ou si une erreur persistante se produit.
+            // if (result.evenementDetecte && alert.id !== 'cmd-line-override') {
+            //     // Exemple: Mettre à jour l'alerte dans la base de données
+            //     // const connection = await getConnection(); // Obtenir une nouvelle connexion
+            //     // await connection.execute('UPDATE alerts SET is_accessible = 1 WHERE id = ?', [alert.id]);
+            //     // await connection.end();
+            //     // console.log(`Alerte ${alert.id} mise à jour dans la DB: événement détecté.`);
+            // }
+
+            await page.close(); // Ferme la page après le scraping
+            await setTimeout(5000); // Pause entre chaque alerte pour éviter d'être bloqué
+        }
+
+    } catch (error) {
+        console.error('Erreur inattendue lors de l\'exécution du scraper :', error);
     } finally {
         if (navigateur) {
             await navigateur.close();
-            console.log(`Mapsur fermé pour : ${urlCible}`);
+            console.log('Navigateur fermé.');
         }
     }
 }
 
-// --- Exécution de l'application ---
-const { urlCible, emailNotification, texteDeclencheurEvenement } = parseArguments(process.argv);
-
-// Lance l'exécution du scraping
-executerScrapingSite(urlCible, emailNotification, texteDeclencheurEvenement)
-    .then(resultats => {
-        console.log('\nOpération terminée.');
-    })
-    .catch(erreur => {
-        console.error('Erreur inattendue lors de l\'exécution du scraper :', erreur);
-    });
+// Lance la fonction principale
+main().catch(console.error);

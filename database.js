@@ -1,5 +1,6 @@
-const mysql = require('mysql2/promise');
-require ('dotenv').config();
+import mysql from 'mysql2/promise';
+import dotenv from 'dotenv';
+dotenv.config();
 
 const dbConfig = {
   host: process.env.DB_HOST,
@@ -8,8 +9,11 @@ const dbConfig = {
   database: process.env.DB_NAME,
 };
 
+/**
+ * @returns {Promise<mysql.Connection>}
+ */
 async function getConnection() {
   return await mysql.createConnection(dbConfig);
 }
 
-module.exports = { getConnection };
+export default getConnection;

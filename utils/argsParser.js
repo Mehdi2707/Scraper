@@ -1,5 +1,3 @@
-// utils/argsParser.js
-
 /**
  * Parse les arguments de la ligne de commande.
  * @param {Array<string>} args - Les arguments bruts de process.argv.
@@ -20,18 +18,6 @@ export function parseArguments(args) {
 
     if (indexEmail !== -1 && argumentsLigneCommande[indexEmail + 1]) {
         emailNotification = argumentsLigneCommande[indexEmail + 1];
-    }
-
-    if (!urlCible) {
-        console.log(`
-Utilisation: node scraper.js --url <URL> [--notification-email <EMAIL_TO_NOTIFY>]
-
-Exemples :
-  node scraper.js --url https://www.ticketmaster.fr/... --notification-email mon_email@example.com
-  node scraper.js --url https://www.boutique-en-ligne.com --notification-email mon_email@example.com
-  node scraper.js --url https://www.mon-blog.com
-        `);
-        process.exit(1);
     }
 
     return { urlCible, emailNotification, texteDeclencheurEvenement };
