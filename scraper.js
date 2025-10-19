@@ -1,21 +1,12 @@
-// 1. Importez et configurez dotenv en premier
 import dotenv from 'dotenv';
-dotenv.config(); // Charge les variables d'environnement de votre fichier .env
+dotenv.config();
 
-// 2. Ensuite, importez les autres modules
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import fs from 'fs';
-import path from 'path';
-import { setTimeout } from "node:timers/promises"; // Pour la fonction sommeil (sleep)
 
-// Importez vos fonctions depuis les fichiers utilitaires
 import { envoyerNotificationEmail } from './utils/emailService.js';
-import { verifierDisponibiliteBillets } from './utils/scraperUtils.js';
-import { parseArguments } from './utils/argsParser.js';
-import { getAlerts } from './utils/getAlerts.js';
+import { verifierDisponibiliteBillets } from './utils/checkDisponibility.js';
 
-// 3. Activez le plugin Stealth pour Puppeteer-Extra
 puppeteer.use(StealthPlugin());
 
 /**
@@ -25,90 +16,186 @@ puppeteer.use(StealthPlugin());
  * @param {string} urlCible - L'URL à scraper.
  * @param {string} [emailNotification=''] - L'adresse e-mail pour la notification.
  * @param {string} [texteDeclencheurEvenement=''] - Le texte de l'événement déclencheur.
- * @returns {Promise<object>} Les résultats du scraping pour cette URL.
+ * @param {string} [CATEGORIE_CIBLE=''] - La catégorie spécifique à surveiller (vide pour toutes).
+ * @returns {Promise} Les résultats du scraping pour cette URL.
  */
-async function scrapeSingleUrl(page, urlCible, emailNotification = '', texteDeclencheurEvenement = '') {
+export async function scrapeSingleUrl(page, alertData) {
+    const { link: urlCible, email: emailNotification = '', trigger_text: texteDeclencheurEvenement = '', categorie: CATEGORIE_CIBLE } = alertData;
+    
+    const isGenericMode = !CATEGORIE_CIBLE || CATEGORIE_CIBLE.trim() === '';
+
     try {
+        if (isGenericMode) {
+            console.log(`Alerte ${alertData.id}: La colonne 'categorie' est vide. Passage en mode de détection générique (toutes catégories).`);
+        } else {
+            console.log(`Alerte ${alertData.id}: Recherche ciblée de la catégorie : ${CATEGORIE_CIBLE}`);
+        }
+
         console.log(`Navigation vers : ${urlCible}`);
         await page.goto(urlCible, { waitUntil: 'networkidle2', timeout: 80000 });
-        //await setTimeout(20000); // Attendre un peu après le chargement initial
 
-        const selecteurBoutonChoixRapide = '.event-choice-map-fast-btn';
-        const selecteurListePrix = '.session-price-list';
-
-        let listeEstDejaVisible = false;
+        const selecteurSessions = '#sessionsSelect';
+        
+        // Si on a plusieurs dates vérifier pour chaque date
+        let sessions = [];
         try {
-            console.log(`Vérification si la liste des prix est déjà visible : "${selecteurListePrix}"...`);
-            await page.waitForSelector(selecteurListePrix, { visible: true, timeout: 5000 });
-            console.log("La liste des prix est déjà visible. Pas besoin de cliquer sur le bouton.");
-            listeEstDejaVisible = true;
-        } catch (erreur) {
-            console.log("La liste des prix n'est pas directement visible. Tentative de clic sur le bouton 'Choix rapide par tarif'.");
-            listeEstDejaVisible = false;
-        }
-
-        if (!listeEstDejaVisible) {
-            let texteBoutonChoixRapide = '';
-            try {
-                console.log(`Attente du bouton "Choix rapide par tarif" : "${selecteurBoutonChoixRapide}"...`);
-                await page.waitForSelector(selecteurBoutonChoixRapide, { visible: true, timeout: 5000 });
-                console.log("Bouton 'Choix rapide par tarif' détecté.");
-
-                texteBoutonChoixRapide = await page.evaluate(sel => {
-                    const element = document.querySelector(sel);
-                    const elementSpan = element ? element.querySelector('span') : null;
-                    return elementSpan ? elementSpan.innerText : '';
-                }, selecteurBoutonChoixRapide);
+            await page.waitForSelector(selecteurSessions, { timeout: 5000 });
+            sessions = await page.evaluate((sel) => {
+                const selectElement = document.querySelector(sel);
+                if (!selectElement) return [];
                 
-                console.log(`Texte trouvé dans le bouton : "${texteBoutonChoixRapide}"`);
+                return Array.from(selectElement.options).map((option, index) => ({
+                    value: option.value,
+                    text: option.textContent.trim().replace(/\s{2,}/g, ' '),
+                    index: index
+                }));
+            }, selecteurSessions);
+            console.log(`Sélectionneur de session trouvé. ${sessions.length} sessions disponibles.`);
+        } catch (e) {
+            console.log("Aucun sélecteur de session (#sessionsSelect) trouvé ou chargé. Poursuite avec l'URL initiale.");
+            sessions = [{ value: null, text: 'Date par défaut', index: 0 }];
+        }
+        
+        let evenementDetecte = false;
+        let notificationEnvoyee = false;
+        let statutBillets = null;
 
-                if (texteBoutonChoixRapide.includes("Choix rapide par tarif")) { 
-                    console.log(`Tentative de clic sur le bouton : "${selecteurBoutonChoixRapide}"...`);
-                    await page.click(selecteurBoutonChoixRapide);
-                    console.log("Clic effectué sur 'Choix rapide par tarif'. Attente de la liste des prix...");
-                    await page.waitForSelector(selecteurListePrix, { visible: true, timeout: 5000 });
-                    console.log("Liste des prix apparue après le clic.");
-                } else {
-                    console.warn(`Le bouton "${selecteurBoutonChoixRapide}" n'a pas le texte attendu. Saut du clic.`);
+        for (const session of sessions) {
+            
+            console.log(`\n--- VÉRIFICATION DE LA SESSION : ${session.text} ---`);
+
+            if (session.value !== null && session.index > 0) {
+                try {
+                    console.log(`Changement de session vers l'index ${session.index}...`);
+                    await page.select(selecteurSessions, session.value);
+                    
+                    // Attendre le rechargement partiel ou complet de la page
+                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 3000 })
+                        .catch(err => {
+                            console.log("Navigation possiblement partielle après le changement de session ou timeout :", err.message);
+                            // On continue même en cas de timeout pour tenter le scraping
+                        });
+                    
+                } catch (err) {
+                    console.error(`Erreur lors du changement vers la session ${session.text}:`, err.message);
+                    continue;
+                }
+            }
+            
+            const selecteurBoutonChoixRapide = '.event-choice-map-fast-btn';
+            const selecteurListePrix = '.session-price-list';
+
+            let listeEstDejaVisible = false;
+            try {
+                 await page.waitForSelector(selecteurListePrix, { visible: true, timeout: 5000 });
+                 listeEstDejaVisible = true;
+            } catch (erreur) {
+                 listeEstDejaVisible = false;
+            }
+
+            if (!listeEstDejaVisible) {
+                let texteBoutonChoixRapide = '';
+                try {
+                    console.log(`Attente du bouton "Choix rapide par tarif" : "${selecteurBoutonChoixRapide}"...`);
+                    await page.waitForSelector(selecteurBoutonChoixRapide, { visible: true, timeout: 5000 });
+                    console.log("Bouton 'Choix rapide par tarif' détecté.");
+
+                    texteBoutonChoixRapide = await page.evaluate(sel => {
+                        const element = document.querySelector(sel);
+                        const elementSpan = element ? element.querySelector('span') : null;
+                        return elementSpan ? elementSpan.innerText : '';
+                    }, selecteurBoutonChoixRapide);
+                    
+                    console.log(`Texte trouvé dans le bouton : "${texteBoutonChoixRapide}"`);
+
+                    if (texteBoutonChoixRapide.includes("Choix rapide par tarif")) { 
+                        console.log(`Tentative de clic sur le bouton : "${selecteurBoutonChoixRapide}"...`);
+                        await page.click(selecteurBoutonChoixRapide);
+                        console.log("Clic effectué sur 'Choix rapide par tarif'. Attente de la liste des prix...");
+                        await page.waitForSelector(selecteurListePrix, { visible: true, timeout: 5000 });
+                        console.log("Liste des prix apparue après le clic.");
+                    } else {
+                        console.warn(`Le bouton "${selecteurBoutonChoixRapide}" n'a pas le texte attendu. Saut du clic.`);
+                    }
+
+                } catch (erreurBouton) {
+                    console.error(`Erreur critique : Le bouton "${selecteurBoutonChoixRapide}" n'a pas été trouvé ou cliqué. Impossible de continuer. Erreur: ${erreurBouton.message}`);
+                    throw new Error(`Impossible d'afficher la liste des prix : ${erreurBouton.message}`);
                 }
 
-            } catch (erreurBouton) {
-                console.error(`Erreur critique : Le bouton "${selecteurBoutonChoixRapide}" n'a pas été trouvé ou cliqué. Impossible de continuer. Erreur: ${erreurBouton.message}`);
-                throw new Error(`Impossible d'afficher la liste des prix : ${erreurBouton.message}`);
+                try {
+                    await page.waitForSelector(selecteurBoutonChoixRapide, { visible: true, timeout: 5000 });
+                    const texteBoutonChoixRapide = await page.evaluate(sel => {
+                        const element = document.querySelector(sel);
+                        const elementSpan = element ? element.querySelector('span') : null;
+                        return elementSpan ? elementSpan.innerText : '';
+                    }, selecteurBoutonChoixRapide);
+                    
+                    if (texteBoutonChoixRapide.includes("Choix rapide par tarif")) { 
+                        await page.click(selecteurBoutonChoixRapide);
+                        await page.waitForSelector(selecteurListePrix, { visible: true, timeout: 5000 });
+                    }
+                } catch (erreurBouton) {
+                    console.warn(`Liste des prix non accessible pour la session ${session.text}. (Erreur: ${erreurBouton.message})`);
+                    continue;
+                }
             }
-        }
 
-        console.log("\nDébut de la vérification de la disponibilité des places...");
-        const statutBillets = await verifierDisponibiliteBillets(page);
-        let evenementDetecte = statutBillets.estDisponible;
+            statutBillets = await verifierDisponibiliteBillets(page); 
+            
+            let placeDisponible = false;
+            let categorieDetectee = null;
+            
+            if (isGenericMode) {
+                const premierBilletDisponible = statutBillets.details.find(cat => cat.aBoutonPlus);
+                if (premierBilletDisponible) {
+                    placeDisponible = true;
+                    categorieDetectee = premierBilletDisponible;
+                }
+            } else {
+                const categorieCibleTrouvee = statutBillets.details.find(cat => cat.categorie === CATEGORIE_CIBLE);
+                if (categorieCibleTrouvee && categorieCibleTrouvee.aBoutonPlus) {
+                    placeDisponible = true;
+                    categorieDetectee = categorieCibleTrouvee;
+                }
+            }
+            
+            if (placeDisponible) {
+                evenementDetecte = true;
 
-        if (evenementDetecte && emailNotification) {
-            let detailsNotification = statutBillets.details.map(t => `${t.categorie} (${t.statut || 'Disponible'}) ${t.prix}`).join(', ');
-            const texteFinalEvenement = texteDeclencheurEvenement || `Places disponibles : ${detailsNotification}`;
-            await envoyerNotificationEmail(emailNotification, urlCible, texteFinalEvenement);
-        }
+                if (emailNotification) {
+                    const detailPlaceReservee = categorieDetectee ? 
+                        `${categorieDetectee.categorie} (${categorieDetectee.statut}) ${categorieDetectee.prix || 'Prix non affiché'}` : 
+                        'Place disponible détectée !';
+                        
+                    const titreCat = isGenericMode ? 'Catégorie Générique' : CATEGORIE_CIBLE;
+                    const texteFinalEvenement = texteDeclencheurEvenement || `🚨 PLACE DISPONIBLE pour ${session.text}: ${detailPlaceReservee}. ACTION REQUISE.`;
+                    const titreMail = `Ticketmaster Alerte : Place Disponible pour ${titreCat} (${session.text})`;
 
-        const dossierCaptures = './screenshots';
-        if (!fs.existsSync(dossierCaptures)) {
-            fs.mkdirSync(dossierCaptures);
-        }
-        const cheminCapture = path.join(dossierCaptures, `${new URL(urlCible).hostname.replace(/[^a-z0-9]/gi, '_')}-${Date.now()}.png`);
-        await page.screenshot({ path: cheminCapture, fullPage: true });
-        console.log(`Capture d'écran sauvegardée ici : ${cheminCapture}`);
+                    await envoyerNotificationEmail(emailNotification, page.url(), texteFinalEvenement, titreMail);
+                    console.log(`✅ Notification de DISPONIBILITÉ envoyée pour la session: ${session.text}.`);
+                    notificationEnvoyee = true;
 
-        console.log('\n--- Résultats du Scraping ---');
-        console.log(`URL Scrape : ${urlCible}`);
-        console.log(`Événement détecté (places disponibles) : ${evenementDetecte ? 'Oui' : 'Non'}`);
-        if (statutBillets.toutesCategories) {
-            console.log('Statuts de toutes les catégories :');
-            statutBillets.toutesCategories.forEach(cat => console.log(`- ${cat.categorie}: ${cat.statut} (Bouton '+': ${cat.aBoutonPlus ? 'Oui' : 'Non'})`));
+                    return {
+                        url: urlCible,
+                        evenementDetecte: true,
+                        notificationEnvoyee: true,
+                        categorieCible: isGenericMode ? categorieDetectee.categorie : CATEGORIE_CIBLE,
+                        sessionTrouvee: session.text
+                    };
+                }
+            } else {
+                const categorieLog = isGenericMode ? 'Générique' : CATEGORIE_CIBLE;
+                console.log(`Surveillance : Aucune place disponible pour la recherche ${categorieLog} sur la session ${session.text}.`);
+            }
+            
         }
 
         return {
             url: urlCible,
             evenementDetecte: evenementDetecte,
-            billetsDisponibles: statutBillets.details,
-            captureEcran: cheminCapture
+            notificationEnvoyee: notificationEnvoyee,
+            billetsDisponibles: statutBillets ? statutBillets.details : []
         };
 
     } catch (erreur) {
@@ -120,76 +207,3 @@ async function scrapeSingleUrl(page, urlCible, emailNotification = '', texteDecl
     }
 }
 
-// --- Fonction principale d'exécution ---
-async function main() {
-    let navigateur;
-    try {
-        // 1. Parse les arguments de la ligne de commande
-        const { urlCible: cmdLineUrl, emailNotification: cmdLineEmail, texteDeclencheurEvenement: cmdLineTriggerText } = parseArguments(process.argv);
-
-        // 2. Récupère les alertes depuis la base de données
-        let alerts = await getAlerts();
-
-        // 3. Gère l'URL de la ligne de commande : l'ajoute si fournie et non déjà dans la DB
-        if (cmdLineUrl) {
-            const isUrlAlreadyInDb = alerts.some(alert => alert.link === cmdLineUrl);
-            if (!isUrlAlreadyInDb) {
-                console.log(`Ajout de l'URL de la ligne de commande (${cmdLineUrl}) à la liste des alertes à scraper.`);
-                // Crée un objet alerte temporaire pour l'URL de la ligne de commande
-                alerts.push({ 
-                    id: 'cmd-line-override', 
-                    link: cmdLineUrl, 
-                    email: cmdLineEmail, 
-                    trigger_text: cmdLineTriggerText 
-                });
-            } else {
-                console.log(`L'URL de la ligne de commande (${cmdLineUrl}) est déjà présente dans la base de données. Elle sera traitée comme une alerte DB.`);
-            }
-        }
-
-        if (alerts.length === 0) {
-            console.log("Aucune alerte à scraper (ni via base de données, ni via ligne de commande).");
-            return; // Quitte si rien à scraper
-        }
-
-        console.log(`Lancement du navigateur pour ${alerts.length} alerte(s).`);
-        navigateur = await puppeteer.launch({ headless: false }); // Lance le navigateur une seule fois
-
-        // 4. Boucle sur toutes les alertes (DB + ligne de commande si ajoutée)
-        for (const alert of alerts) {
-            console.log(`\n--- Début du traitement pour l'alerte ID: ${alert.id || 'N/A'} (URL: ${alert.link}) ---`);
-            const page = await navigateur.newPage(); // Ouvre une nouvelle page pour chaque alerte
-            
-            // Utilise les informations spécifiques à l'alerte, ou les valeurs de la ligne de commande si non définies dans l'alerte
-            const currentEmail = alert.email || cmdLineEmail;
-            const currentTriggerText = alert.trigger_text || cmdLineTriggerText;
-
-            const result = await scrapeSingleUrl(page, alert.link, currentEmail, currentTriggerText);
-            
-            // Ici, vous pouvez ajouter une logique pour mettre à jour la base de données
-            // par exemple, marquer l'alerte comme 'accessible' ou 'fermée' si un événement est détecté
-            // ou si une erreur persistante se produit.
-            // if (result.evenementDetecte && alert.id !== 'cmd-line-override') {
-            //     // Exemple: Mettre à jour l'alerte dans la base de données
-            //     // const connection = await getConnection(); // Obtenir une nouvelle connexion
-            //     // await connection.execute('UPDATE alerts SET is_accessible = 1 WHERE id = ?', [alert.id]);
-            //     // await connection.end();
-            //     // console.log(`Alerte ${alert.id} mise à jour dans la DB: événement détecté.`);
-            // }
-
-            await page.close(); // Ferme la page après le scraping
-            await setTimeout(5000); // Pause entre chaque alerte pour éviter d'être bloqué
-        }
-
-    } catch (error) {
-        console.error('Erreur inattendue lors de l\'exécution du scraper :', error);
-    } finally {
-        if (navigateur) {
-            await navigateur.close();
-            console.log('Navigateur fermé.');
-        }
-    }
-}
-
-// Lance la fonction principale
-main().catch(console.error);

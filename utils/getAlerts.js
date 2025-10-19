@@ -17,6 +17,7 @@ export async function getAlerts() {
 
         return alerts;
     } catch (error) {
+        console.error('Erreur lors de la récupération des alertes :', error);
         return [];
     } finally {
         if (connection) {
