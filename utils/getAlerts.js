@@ -11,8 +11,7 @@ export async function getAlerts() {
 
         const [alerts] = await connection.execute(
             `SELECT * FROM alerts
-            WHERE is_closed = 0
-            AND is_accessible = 0`
+            WHERE is_closed = 0`
         );
 
         return alerts;

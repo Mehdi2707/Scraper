@@ -12,9 +12,7 @@ export async function verifierDisponibiliteBillets(page) {
     const selecteurBoutonPlusQuantite = '.session-price-item-content .event-ticket-qty-btn-plus';
 
     try {
-        console.log(`Vérification de la liste des prix : "${selecteurListeDisponibilite}"...`);
         await page.waitForSelector(selecteurListeDisponibilite, { visible: true, timeout: 10000 });
-        console.log("Liste des prix présente. Analyse des catégories.");
 
         const resultats = await page.evaluate((selArticle, selStatut, selNomCat, selPrixCat, selBoutonPlus) => {
             const articles = Array.from(document.querySelectorAll(selArticle));
@@ -56,20 +54,12 @@ export async function verifierDisponibiliteBillets(page) {
         }, selecteurArticle, selecteurStatut, selecteurNomCategorie, selecteurPrixCategorie, selecteurBoutonPlusQuantite); 
 
         if (resultats.billetsDisponibles.length > 0) {
-            console.log("--- BILLETS DISPONIBLES DÉTECTÉS ! ---");
-            resultats.billetsDisponibles.forEach(billet => {
-                console.log(`Catégorie : ${billet.categorie}, Statut : ${billet.statut}, Prix : ${billet.prix}, Bouton '+' présent : ${billet.aBoutonPlus ? 'Oui' : 'Non'}`);
-            });
             return {
                 estDisponible: true,
                 details: resultats.billetsDisponibles,
                 toutesCategories: resultats.toutesCategories
             };
         } else {
-            console.log("Aucune place disponible détectée pour l'instant.");
-            resultats.toutesCategories.forEach(cat => {
-                console.log(`- ${cat.categorie}: ${cat.statut}, Prix : ${cat.prix}, (Bouton '+': ${cat.aBoutonPlus ? 'Oui' : 'Non'})`);
-            });
             return {
                 estDisponible: false,
                 details: [],
