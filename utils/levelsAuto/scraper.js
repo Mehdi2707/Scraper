@@ -132,12 +132,8 @@ export async function levelsAutoScraper(page, alertData) {
         };
 
     } catch (erreur) {
-        console.error(`Erreur lors du scraping de LevelsAuto (${urlCible}) :`, erreur);
-        return {
-            url: urlCible,
-            erreur: erreur.message,
-            notificationEnvoyee: false
-        };
+        console.error(`Erreur lors du scraping de ${urlCible} :`, erreur);
+        throw erreur;
     } finally {
         if (connection) await connection.end();
     }

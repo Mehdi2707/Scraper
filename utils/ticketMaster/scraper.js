@@ -97,7 +97,8 @@ export async function ticketMasterScraper(page, alertData) {
                     }
 
                 } catch (erreurBouton) {
-                    throw new Error(`Impossible d'afficher la liste des prix : ${erreurBouton.message}`);
+                    console.warn(`Erreur de logique de scraping (bouton/liste prix) pour ${urlCible} : ${erreurBouton.message}`);
+                    continue;
                 }
 
                 try {
@@ -174,10 +175,7 @@ export async function ticketMasterScraper(page, alertData) {
 
     } catch (erreur) {
         console.error(`Erreur lors du scraping de ${urlCible} :`, erreur);
-        return {
-            url: urlCible,
-            erreur: erreur.message
-        };
+        throw erreur;
     }
 }
 

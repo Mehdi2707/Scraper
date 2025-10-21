@@ -6,7 +6,7 @@ Ce projet est une solution de surveillance automatisée conçue pour scruter plu
 
 * **Scraping Multi-Site :** Prise en charge initiale de **Ticketmaster** (surveillance de billets/catégories) et **LevelsAuto** (surveillance de nouveaux véhicules).
 * **Architecture Modulaire :** Les logiques de scraping sont isolées dans des fichiers dédiés (`utils/levelsAuto`, `utils/ticketMaster`), permettant une extensibilité facile.
-* **Surveillance Permanente :** Le programme tourne en boucle, exécutant les alertes de la base de données à intervalles réguliers (20 secondes par défaut).
+* **Surveillance Permanente :** Le programme tourne en boucle, exécutant les alertes de la base de données en continue.
 * **Détection Intelligente :**
     * **Ticketmaster :** Détection de la disponibilité d'une catégorie spécifique ou générique.
     * **LevelsAuto :** Détection de **nouveaux produits** par comparaison de contenu HTML stocké en DB, garantissant que seules les annonces réellement nouvelles déclenchent une notification.
@@ -65,10 +65,10 @@ Ce projet est une solution de surveillance automatisée conçue pour scruter plu
     | **`link`** | VARCHAR | URL cible du scraping. |
     | **`email`** | VARCHAR | E-mail du destinataire. |
     | **`categorie`** | VARCHAR | Catégorie/mot-clé spécifique. |
-    | **`is_closed`** | BOOLEAN | `1` si l'alerte est fermée. |
-    | **`is_accessible`**| BOOLEAN | **Discriminateur de Scraper :** `0` pour Ticketmaster, `1` pour LevelsAuto. |
+    | **`is_closed`** | TINYINT | `1` si l'alerte est fermée. |
+    | **`is_accessible`**| TINYINT | **Discriminateur de Scraper :** `0` pour Ticketmaster, `1` pour LevelsAuto. |
     | **`html`** | LONGTEXT | Stocke le HTML pour comparaison (utilisé par LevelsAuto). |
-    | **`close_alert`** | BOOLEAN | Indique si l'alerte doit être fermée après la première notification. |
+    | **`close_alert`** | TINYINT | Indique si l'alerte doit être fermée après la première notification. |
 
 ---
 
