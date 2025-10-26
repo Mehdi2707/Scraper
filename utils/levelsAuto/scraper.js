@@ -1,14 +1,5 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { JSDOM } from 'jsdom';
 import getConnection from '../../database.js';
-
-import { envoyerNotificationEmail } from '../emailService.js';
-
-puppeteer.use(StealthPlugin());
 
 const SELECTEUR_CONTENEUR_VEHICULES = '.neocatalog-products.clearfix.grid';
 const SELECTEUR_VEHICULE = '.column';
@@ -63,10 +54,9 @@ function extraireVehicules(htmlContent) {
  * @returns {Promise<Object>} Les résultats du scraping.
  */
 export async function levelsAutoScraper(page, alertData) {
-    const { link: urlCible, email: emailNotification = '', id: alertId, html: htmlAncien } = alertData;
+    const { link: urlCible, id: alertId, html: htmlAncien } = alertData;
 
     let connection;
-    let notificationEnvoyee = false;
     
     try {
         await page.goto(urlCible, { waitUntil: 'domcontentloaded', timeout: 60000 }); 
@@ -84,8 +74,7 @@ export async function levelsAutoScraper(page, alertData) {
 
             return {
                 url: urlCible,
-                evenementDetecte: false,
-                notificationEnvoyee: false
+                evenementDetecte: false
             };
 
         } else if (htmlAncien.trim() !== htmlNouveau.trim()) {
@@ -97,18 +86,11 @@ export async function levelsAutoScraper(page, alertData) {
             if (nouveauxVehicules.length > 0) {
                 notificationEnvoyee = true;
 
-                for (const vehicule of nouveauxVehicules) {
-                    const [urlRelative, titre] = vehicule.split('|');
-                    const urlComplete = urlRelative;
-                    
-                    const titreMail = `LevelsAuto Alerte : Nouveau véhicule - ${titre}`;
-                    const texteMail = `Un nouveau véhicule a été détecté :\n\n- ${titre}\n\nLien de l'annonce: ${urlComplete}\n\nConsultez le site pour plus de détails.`;
-
-                    if (emailNotification) {
-                        await envoyerNotificationEmail(emailNotification, urlComplete, texteMail, titreMail);
-                        console.log(`Notification envoyée pour le nouveau véhicule: ${titre}`);
-                    }
-                }
+                const [urlRelative, titre] = nouveauxVehicules[0].split('|');
+                const urlComplete = urlRelative;
+                
+                const titreMail = `LevelsAuto Alerte : Nouveau véhicule - ${titre}`;
+                const texteMail = `Un nouveau véhicule a été détecté :\n\n- ${titre}\n\nLien de l'annonce: ${urlComplete}\n\nConsultez le site pour plus de détails.`;
                 
                 connection = await getConnection();
                 await connection.execute('UPDATE alerts SET html = ? WHERE id = ?', [htmlNouveau, alertId]);
@@ -116,7 +98,8 @@ export async function levelsAutoScraper(page, alertData) {
                 return {
                     url: urlCible,
                     evenementDetecte: true,
-                    notificationEnvoyee: true
+                    titreMail: titreMail,
+                    texteMail: texteMail
                 };
 
             } else {                
@@ -127,8 +110,7 @@ export async function levelsAutoScraper(page, alertData) {
 
         return {
             url: urlCible,
-            evenementDetecte: false,
-            notificationEnvoyee: notificationEnvoyee
+            evenementDetecte: false
         };
 
     } catch (erreur) {

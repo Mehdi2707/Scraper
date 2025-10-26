@@ -1,10 +1,12 @@
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { getAlerts } from './utils/getAlerts.js';
+import { envoyerNotificationEmail } from './utils/emailService.js';
 import { handleLogin } from './utils/handleLogin.js'; // fonctionnalité future
 import { setTimeout } from "node:timers/promises";
 import { ticketMasterScraper } from './utils/ticketMaster/scraper.js';
 import { levelsAutoScraper } from './utils/levelsAuto/scraper.js';
+import { stockScraper } from './utils/stock/stockScraper.js';
 
 import getConnection from './database.js';
 
@@ -19,7 +21,6 @@ async function main() {
         alerts = await getAlerts();
 
         if (alerts.length === 0) {
-            console.log("Aucune alerte à scraper dans la base de données. Pause de 20sec.");
             shouldPause = true;
             return;
         }
@@ -54,17 +55,36 @@ async function main() {
                 html: alert.html
             };
 
-            let result;
-            
-            if (!alert.is_accessible) {
+            let result = { evenementDetecte: false, notificationEnvoyee: false };
+            const link = alert.link.toLowerCase();
+
+            if (link.includes('ticketmaster.fr')) {
+                result = await ticketMasterScraper(page, alertData);
+            } else if (link.includes('levelsautomobile.fr')) {
+                result = await levelsAutoScraper(page, alertData);
+            } else if (link.includes('cultureindoor.com') || link.includes('irobot.fr') || link.includes('polyfab3d.fr')) {
+                result = await stockScraper(page, alertData);
+            } else if (!alert.is_accessible) {
                 result = await ticketMasterScraper(page, alertData);
             } else {
                 result = await levelsAutoScraper(page, alertData);
             }
 
+            if (result.evenementDetecte && alertData.email) {
+                const titre = result.titreMail || 'Alerte Scraper : Événement détecté';
+                const texte = result.texteMail || `Un événement a été détecté sur la page surveillée : ${alertData.link}`;
+
+                try {
+                    await envoyerNotificationEmail(alertData.email, result.url || alertData.link, texte, titre);
+                    result.notificationEnvoyee = true;
+                    console.log(`✅ Notification de DISPONIBILITÉ envoyée pour l'alerte: ${alert.id}.`);
+                } catch (mailError) {
+                    console.error(`Erreur lors de l'envoi de mail centralisé pour l'alerte ${alert.id}:`, mailError.message);
+                }
+            }
+
             if (alert.close_alert) {
                 if (result.notificationEnvoyee && alert.id) {
-                    console.log(`Notification envoyée pour l'alerte ${alert.id}. Marquage de l'alerte comme clôturée`);
                     let connection;
                     try {
                         connection = await getConnection();

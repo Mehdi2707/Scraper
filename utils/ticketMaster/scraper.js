@@ -1,13 +1,4 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-
-import { envoyerNotificationEmail } from '../emailService.js';
 import { verifierDisponibiliteBillets } from './checkDisponibility.js';
-
-puppeteer.use(StealthPlugin());
 
 /**
  * Scrape TicketMaster pour la disponibilité des billets.
@@ -18,7 +9,7 @@ puppeteer.use(StealthPlugin());
  * @returns {Promise} Les résultats du scraping pour cette URL.
  */
 export async function ticketMasterScraper(page, alertData) {
-    const { link: urlCible, email: emailNotification = '', categorie: CATEGORIE_CIBLE } = alertData;
+    const { link: urlCible, categorie: CATEGORIE_CIBLE } = alertData;
 
     const isGenericMode = !CATEGORIE_CIBLE || CATEGORIE_CIBLE.trim() === '';
 
@@ -46,7 +37,6 @@ export async function ticketMasterScraper(page, alertData) {
         }
 
         let evenementDetecte = false;
-        let notificationEnvoyee = false;
         let statutBillets = null;
 
         for (const session of sessions) {
@@ -81,7 +71,7 @@ export async function ticketMasterScraper(page, alertData) {
             if (!listeEstDejaVisible) {
                 let texteBoutonChoixRapide = '';
                 try {
-                    await page.waitForSelector(selecteurBoutonChoixRapide, { visible: true, timeout: 5000 });
+                    await page.waitForSelector(selecteurBoutonChoixRapide, { visible: true, timeout: 10000 });
 
                     texteBoutonChoixRapide = await page.evaluate(sel => {
                         const element = document.querySelector(sel);
@@ -98,23 +88,6 @@ export async function ticketMasterScraper(page, alertData) {
 
                 } catch (erreurBouton) {
                     console.warn(`Erreur de logique de scraping (bouton/liste prix) pour ${urlCible} : ${erreurBouton.message}`);
-                    continue;
-                }
-
-                try {
-                    await page.waitForSelector(selecteurBoutonChoixRapide, { visible: true, timeout: 5000 });
-                    const texteBoutonChoixRapide = await page.evaluate(sel => {
-                        const element = document.querySelector(sel);
-                        const elementSpan = element ? element.querySelector('span') : null;
-                        return elementSpan ? elementSpan.innerText : '';
-                    }, selecteurBoutonChoixRapide);
-
-                    if (texteBoutonChoixRapide.includes("Choix rapide par tarif")) {
-                        await page.click(selecteurBoutonChoixRapide);
-                        await page.waitForSelector(selecteurListePrix, { visible: true, timeout: 5000 });
-                    }
-                } catch (erreurBouton) {
-                    console.warn(`Liste des prix non accessible pour la session ${session.text}. (Erreur: ${erreurBouton.message})`);
                     continue;
                 }
             }
@@ -141,27 +114,22 @@ export async function ticketMasterScraper(page, alertData) {
             if (placeDisponible) {
                 evenementDetecte = true;
 
-                if (emailNotification) {
-                    const detailPlaceReservee = categorieDetectee ?
-                        `${categorieDetectee.categorie} (${categorieDetectee.statut}) ${categorieDetectee.prix || 'Prix non affiché'}` :
-                        'Place disponible détectée !';
+                const detailPlaceReservee = categorieDetectee ?
+                    `${categorieDetectee.categorie} (${categorieDetectee.statut}) ${categorieDetectee.prix || 'Prix non affiché'}` :
+                    'Place disponible détectée !';
 
-                    const titreCat = isGenericMode ? 'Catégorie Générique' : CATEGORIE_CIBLE;
-                    const texteFinalEvenement = `🚨 PLACE DISPONIBLE pour ${session.text}: ${detailPlaceReservee}. ACTION REQUISE.`;
-                    const titreMail = `Ticketmaster Alerte : Place Disponible pour ${titreCat} (${session.text})`;
+                const titreCat = isGenericMode ? 'Catégorie Générique' : CATEGORIE_CIBLE;
+                const texteFinalEvenement = `🚨 PLACE DISPONIBLE pour ${session.text}: ${detailPlaceReservee}. ACTION REQUISE.`;
+                const titreMail = `Ticketmaster Alerte : Place Disponible pour ${titreCat} (${session.text})`;
 
-                    await envoyerNotificationEmail(emailNotification, page.url(), texteFinalEvenement, titreMail);
-                    console.log(`✅ Notification de DISPONIBILITÉ envoyée pour la session: ${session.text}.`);
-                    notificationEnvoyee = true;
-
-                    return {
-                        url: urlCible,
-                        evenementDetecte: true,
-                        notificationEnvoyee: true,
-                        categorieCible: isGenericMode ? categorieDetectee.categorie : CATEGORIE_CIBLE,
-                        sessionTrouvee: session.text
-                    };
-                }
+                return {
+                    url: urlCible,
+                    evenementDetecte: true,
+                    titreMail: titreMail,
+                    texteMail: texteFinalEvenement,
+                    categorieCible: isGenericMode ? categorieDetectee.categorie : CATEGORIE_CIBLE,
+                    sessionTrouvee: session.text
+                };
             }
 
         }
@@ -169,7 +137,6 @@ export async function ticketMasterScraper(page, alertData) {
         return {
             url: urlCible,
             evenementDetecte: evenementDetecte,
-            notificationEnvoyee: notificationEnvoyee,
             billetsDisponibles: statutBillets ? statutBillets.details : []
         };
 
