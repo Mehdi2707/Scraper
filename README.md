@@ -1,15 +1,16 @@
-# 🤖 Scraper d'Alertes Multi-Sites (Ticketmaster & LevelsAuto)
+# 🤖 Scraper Multi-Sites
 
-Ce projet est une solution de surveillance automatisée conçue pour scruter plusieurs sites web à la recherche de changements (nouvelles places, nouveaux véhicules, etc.) et envoyer des notifications par e-mail lorsqu'une alerte enregistrée en base de données est déclenchée. Il est construit sur une architecture modulaire, ce qui facilite l'ajout de nouveaux sites de scraping.
+Ce projet est une solution de surveillance automatisée conçue pour scruter plusieurs sites web à la recherche de changements et envoyer des notifications par e-mail lorsqu'une alerte enregistrée en base de données est déclenchée. Il est construit sur une architecture modulaire, ce qui facilite l'ajout de nouveaux sites de scraping.
 
 ## 🚀 Fonctionnalités Clés
 
-* **Scraping Multi-Site :** Prise en charge initiale de **Ticketmaster** (surveillance de billets/catégories) et **LevelsAuto** (surveillance de nouveaux véhicules).
-* **Architecture Modulaire :** Les logiques de scraping sont isolées dans des fichiers dédiés (`utils/levelsAuto`, `utils/ticketMaster`), permettant une extensibilité facile.
+* **Scraping Multi-Site :** Prise en charge initiale de **Ticketmaster** (surveillance de billets/catégories), **LevelsAuto** (surveillance de nouveaux véhicules) et de **Site e-commerce** (surveillance de la disponibilité).
+* **Architecture Modulaire :** Les logiques de scraping sont isolées dans des fichiers dédiés (`utils/'specificScraper'`), permettant une extensibilité facile.
 * **Surveillance Permanente :** Le programme tourne en boucle, exécutant les alertes de la base de données en continue.
 * **Détection Intelligente :**
-    * **Ticketmaster :** Détection de la disponibilité d'une catégorie spécifique ou générique.
+    * **Ticketmaster :** Détection de la disponibilité d'une catégorie spécifique ou générique (toutes catégories).
     * **LevelsAuto :** Détection de **nouveaux produits** par comparaison de contenu HTML stocké en DB, garantissant que seules les annonces réellement nouvelles déclenchent une notification.
+    * **Site e-commerce :** Détection de la disponibilité d'un produit.
 * **Système d'Alertes Centralisé :** Les alertes sont gérées via une base de données (accès via `database.js`).
 * **Notifications par E-mail :** Envoi d'e-mails pour chaque événement détecté.
 * **Anti-Détection (Stealth) :** Utilisation de `puppeteer-extra` et du plugin `puppeteer-extra-plugin-stealth` pour minimiser le risque de blocage.
@@ -28,32 +29,18 @@ Ce projet est une solution de surveillance automatisée conçue pour scruter plu
 
 1.  **Cloner le dépôt** :
     ```bash
-    git clone [URL_DE_VOTRE_DEPOT]
-    cd [NOM_DU_DOSSIER]
+    git clone https://github.com/Mehdi2707/Scraper.git
+    cd Scraper
     ```
 
 2.  **Installer les dépendances** :
     ```bash
     npm install
-    # Installation de JSDOM est nécessaire pour l'analyse HTML du scraper LevelsAuto
-    npm install jsdom
     ```
 
 3.  **Configuration de l'environnement (`.env`)** :
-    Créez un fichier `.env` à la racine du projet et configurez les accès à la DB et au service d'e-mail.
 
-    ```env
-    # --- Configuration Base de Données ---
-    DB_HOST=localhost
-    DB_USER=root
-    DB_PASSWORD=votre_mot_de_passe
-    DB_NAME=votre_base_de_donnees
-
-    # --- Configuration E-mail (SMTP) ---
-    MAIL_SERVICE=gmail # ou outlook, sendgrid, etc.
-    MAIL_ADDRESS=votre_email@example.com
-    MAIL_PASSWORD=votre_mot_de_passe_ou_cle_api
-    ```
+    Renommer le fichier `.env.example` en `.env` et configurez les accès à la DB et au service d'e-mail.
 
 4.  **Configuration de la Base de Données** :
 
@@ -78,3 +65,16 @@ Pour lancer le service de scraping en boucle :
 
 ```bash
 node start-scrap.js
+```
+
+Vous pouvez également lancer le service en arrière plan (fichier de log à la racine du projet):
+
+```bash
+node start-scrap.js >> scraper.log 2>&1 &
+```
+
+Puis l'arrêter avec le numéro du processus :
+
+```bash
+kill -9 `[N° Process]`
+```

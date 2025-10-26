@@ -59,8 +59,6 @@ export async function stockScraper(page, alertData) {
 
 
         if (estDisponible) {
-            console.log(`✅ Produit disponible détecté sur ${configKey} : ${urlCible}`);
-
             const titreMail = `${configKey} Alerte : Produit de nouveau en stock !`;
             const texteMail = `Le produit est de nouveau disponible : ${urlCible}`;
 
