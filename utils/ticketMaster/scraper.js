@@ -3,14 +3,13 @@ import { verifierDisponibiliteBillets } from './checkDisponibility.js';
 /**
  * Scrape TicketMaster pour la disponibilité des billets.
  * @param {Page} page - L'objet Page de Puppeteer déjà ouvert.
- * @param {string} urlCible - L'URL à scraper.
- * @param {string} [emailNotification=''] - L'adresse e-mail pour la notification.
- * @param {string} [CATEGORIE_CIBLE=''] - La catégorie spécifique à surveiller (vide pour toutes).
+ * @param {Object} alertData - Les données de l'alerte
  * @returns {Promise} Les résultats du scraping pour cette URL.
  */
 export async function ticketMasterScraper(page, alertData) {
-    const { link: urlCible, categorie: CATEGORIE_CIBLE } = alertData;
+    const { link: urlCible, categorie: CATEGORIE_CIBLE, nb_place } = alertData;
 
+    const nbPlacesRequises = nb_place && nb_place > 0 ? nb_place : 1;
     const isGenericMode = !CATEGORIE_CIBLE || CATEGORIE_CIBLE.trim() === '';
 
     try {
@@ -92,20 +91,27 @@ export async function ticketMasterScraper(page, alertData) {
                 }
             }
 
-            statutBillets = await verifierDisponibiliteBillets(page);
+            statutBillets = await verifierDisponibiliteBillets(
+                page,
+                isGenericMode ? null : CATEGORIE_CIBLE,
+                nbPlacesRequises
+            );
 
             let placeDisponible = false;
             let categorieDetectee = null;
 
             if (isGenericMode) {
-                const premierBilletDisponible = statutBillets.details.find(cat => cat.aBoutonPlus);
+                const premierBilletDisponible = statutBillets.details.find(cat => 
+                    cat.aBoutonPlus && cat.nbPlacesDisponibles >= nbPlacesRequises
+                );
                 if (premierBilletDisponible) {
                     placeDisponible = true;
                     categorieDetectee = premierBilletDisponible;
                 }
             } else {
                 const categorieCibleTrouvee = statutBillets.details.find(cat => cat.categorie === CATEGORIE_CIBLE);
-                if (categorieCibleTrouvee && categorieCibleTrouvee.aBoutonPlus) {
+                if (categorieCibleTrouvee && categorieCibleTrouvee.aBoutonPlus && 
+                    categorieCibleTrouvee.nbPlacesDisponibles >= nbPlacesRequises) {
                     placeDisponible = true;
                     categorieDetectee = categorieCibleTrouvee;
                 }
@@ -115,12 +121,12 @@ export async function ticketMasterScraper(page, alertData) {
                 evenementDetecte = true;
 
                 const detailPlaceReservee = categorieDetectee ?
-                    `${categorieDetectee.categorie} (${categorieDetectee.statut}) ${categorieDetectee.prix || 'Prix non affiché'}` :
+                    `${categorieDetectee.categorie} (${categorieDetectee.statut}) ${categorieDetectee.prix || 'Prix non affiché'} - ${categorieDetectee.nbPlacesDisponibles} place(s) disponible(s)` :
                     'Place disponible détectée !';
 
                 const titreCat = isGenericMode ? 'Catégorie Générique' : CATEGORIE_CIBLE;
-                const texteFinalEvenement = `🚨 PLACE DISPONIBLE pour ${session.text}: ${detailPlaceReservee}. ACTION REQUISE.`;
-                const titreMail = `Ticketmaster Alerte : Place Disponible pour ${titreCat} (${session.text})`;
+                const texteFinalEvenement = `🚨 ${nbPlacesRequises} PLACE(S) DISPONIBLE(S) pour ${session.text}: ${detailPlaceReservee}. ACTION REQUISE.`;
+                const titreMail = `Ticketmaster Alerte : ${nbPlacesRequises} Place(s) Disponible(s) pour ${titreCat} (${session.text})`;
 
                 return {
                     url: urlCible,
@@ -128,7 +134,8 @@ export async function ticketMasterScraper(page, alertData) {
                     titreMail: titreMail,
                     texteMail: texteFinalEvenement,
                     categorieCible: isGenericMode ? categorieDetectee.categorie : CATEGORIE_CIBLE,
-                    sessionTrouvee: session.text
+                    sessionTrouvee: session.text,
+                    nbPlacesDisponibles: categorieDetectee.nbPlacesDisponibles
                 };
             }
 
@@ -145,4 +152,3 @@ export async function ticketMasterScraper(page, alertData) {
         throw erreur;
     }
 }
-

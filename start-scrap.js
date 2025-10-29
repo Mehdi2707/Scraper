@@ -45,12 +45,14 @@ async function main() {
             }
 
             const page = await navigateur.newPage();
+            await page.setViewport({ width: 1920, height: 1080 });
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
             const alertData = {
                 link: alert.link,
                 email: alert.email,
                 categorie: alert.categorie,
+                nb_place: alert.nb_place,
                 id: alert.id,
                 html: alert.html
             };
